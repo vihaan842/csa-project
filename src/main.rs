@@ -57,7 +57,7 @@ fn main() {
 	let drawing_area = DrawingArea::new();
 	drawing_area.set_draw_func(move |_, cr, width, height| {
 	    let document = Rc::clone(&document);
-	    match &*document.borrow() {
+	    match &mut *document.borrow_mut() {
 		Some(document) => {
 		    document.draw_root(cr, width, height);
 		},

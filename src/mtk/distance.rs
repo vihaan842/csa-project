@@ -11,13 +11,25 @@ pub enum Distance {
     Auto,
 }
 
+pub enum AutoType {
+    None,
+    Horizontal(f64),
+    Vertical(f64),
+}
+
 impl Distance {
     pub const ZERO: Distance = Distance::Absolute(0.0);
-    pub fn to_absolute(&self, side: f64) -> f64 {
+    pub fn to_absolute(&self, side: f64, auto: AutoType) -> f64 {
 	match self {
 	    Distance::Absolute(d) => *d,
 	    Distance::Relative(p) => side * p,
-	    Distance::Auto => side,
+	    Distance::Auto => {
+		match auto {
+		    AutoType::None => panic!("illegal auto"),
+		    AutoType::Horizontal(h) => h,
+		    AutoType::Vertical(h) => h,
+		}
+	    },
 	}
     }
 }

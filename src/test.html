@@ -2,11 +2,14 @@
 <html>
   <body>
     <h1 id="hello" style="color:green;background-color:blue;">Hopefully this works</h1>
+    <p>Hello</p>
   </body>
   <script>
+    var x = 0;
     var hello = document.getElementById("hello");
     hello.onclick = function() {
-	console.log("hello");
+	x = x + 1;
+	console.log(x);
     };
   </script>
 </html>

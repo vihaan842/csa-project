@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use cairo::{FontWeight, FontSlant};
-use crate::{mtk::{distance::Distance, widgets::{Block, Text, Content}}, types::{Node, NodeType}};
+use crate::{mtk::{distance::Distance, widgets::{Block, Text, EmptyContent, Content}}, types::{Node, NodeType}};
 
 // gets color in rgba
 pub fn get_color(color: String) -> [f64;4] {
@@ -44,6 +44,9 @@ pub fn render_node(node: Rc<Node>) -> Box<dyn Content> {
 	},
 	// containers
 	NodeType::Container(tag_name, children, _) => {
+	    if node.css.borrow().get("display") == Some(&"none".to_string()) {
+		return Box::new(EmptyContent);
+	    }
 	    // find margins and padding
 	    let mut margin_left = Distance::ZERO;
 	    let mut margin_right = Distance::ZERO;

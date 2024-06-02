@@ -1,14 +1,14 @@
-use super::distance::Distance;
+use super::distance::{Distance, AutoType};
 use super::stream::Stream;
 use crate::types::{Node, JSValue, AST};
 
 use std::rc::Rc;
 
-use cairo::{Context, FontFace, FontSlant, FontWeight};
+use cairo::{Context, Operator, FontFace, FontSlant, FontWeight};
 
 pub trait Content: std::fmt::Debug {
-    fn draw(&self, context: &Context, stream: &mut Stream, screen: (f64, f64));
-    fn draw_root(&self, context: &Context, width: i32, height: i32) {
+    fn draw(&mut self, context: &Context, stream: &mut Stream, screen: (f64, f64));
+    fn draw_root(&mut self, context: &Context, width: i32, height: i32) {
 	self.draw(context, &mut Stream::new(0., 0., width as f64, height as f64), (width as f64, height as f64));
     }
     fn propogate_click(&self, x: f64, y: f64, screen: (f64, f64), interpret: Rc<dyn Fn(Box<AST>)>);
@@ -21,6 +21,8 @@ pub struct Block {
     //borders: [Distance;4],
     width: Distance,
     height: Distance,
+    cur_pos: (f64, f64),
+    cur_extents: (f64, f64),
     color: [f64;4],
     children: Vec<Box<dyn Content>>,
     associated: Rc<Node>,
@@ -34,6 +36,8 @@ impl Block {
 	    //borders:[Distance::ZERO, Distance::ZERO, Distance::ZERO, Distance::ZERO],
 	    width: Distance::Auto,
 	    height: Distance::Auto,
+	    cur_pos: (0., 0.),
+	    cur_extents: (0., 0.),
 	    color: [0., 0., 0., 0.],
 	    children: Vec::new(),
 	    associated
@@ -72,13 +76,32 @@ impl Block {
 }
 
 impl Content for Block {
-    fn draw(&self, context: &Context, parent_stream: &mut Stream, screen: (f64, f64)) {
+    fn draw(&mut self, context: &Context, parent_stream: &mut Stream, screen: (f64, f64)) {
 	let disth = |d: Distance| -> f64 {
-	    d.to_absolute(screen.0)
+	    d.to_absolute(screen.0, AutoType::None)
 	};
 	let distv = |d: Distance| -> f64 {
-	    d.to_absolute(screen.1)
+	    d.to_absolute(screen.1, AutoType::None)
 	};
+	
+	let mut child_stream = Stream::new(parent_stream.get_x()+disth(self.margins[3])+disth(self.paddings[3]),
+					   parent_stream.get_y()+distv(self.margins[0])+distv(self.paddings[0]),
+					   parent_stream.get_width()-disth(self.margins[3])-disth(self.margins[1])-disth(self.paddings[1])-disth(self.paddings[3]),
+					   parent_stream.get_height());
+
+	for child in &mut self.children {
+	    child.draw(context, &mut child_stream, screen);
+	}
+
+	let child_width = parent_stream.get_width();
+	let disth = |d: Distance| -> f64 {
+	    d.to_absolute(screen.0, AutoType::Horizontal(child_width))
+	};
+	let child_height = child_stream.get_y() - parent_stream.get_y();
+	let distv = |d: Distance| -> f64 {
+	    d.to_absolute(screen.1, AutoType::Vertical(child_height))
+	};
+
 	context.rectangle(
 	    parent_stream.get_x()+disth(self.margins[3]),
 	    parent_stream.get_y()+distv(self.margins[0]),
@@ -86,27 +109,29 @@ impl Content for Block {
 	    distv(self.height)-distv(self.margins[2])-distv(self.margins[0])
 	);
 	context.set_source_rgba(self.color[0], self.color[1], self.color[2], self.color[3]);
+	// momentarily draw under
+	context.set_operator(Operator::DestOver);
 	context.fill().expect("Couldn't fill cairo context");
-	let mut child_stream = Stream::new(parent_stream.get_x()+disth(self.margins[3])+disth(self.paddings[3]),
-					   parent_stream.get_y()+distv(self.margins[0])+distv(self.paddings[0]),
-					   parent_stream.get_width()-disth(self.margins[3])-disth(self.margins[1])-disth(self.paddings[1])-disth(self.paddings[3]),
-					   parent_stream.get_height());
-	for child in &self.children {
-	    child.draw(context, &mut child_stream, screen);
-	}
+	// go back
+	context.set_operator(Operator::Over);
+	
+	self.cur_pos = (parent_stream.get_x() + disth(self.margins[3]), parent_stream.get_y() + distv(self.margins[0]));
+	
 	parent_stream.increase_y((distv(self.height)+distv(self.margins[2])+distv(self.margins[0])).max(child_stream.get_y() - parent_stream.get_y()));
+
+	self.cur_extents = (disth(self.height), parent_stream.get_y() - self.cur_pos.1);
     }
 
     fn propogate_click(&self, x: f64, y: f64, screen: (f64, f64), interpret: Rc<dyn Fn(Box<AST>)>) {
-	if x > self.margins[3].to_absolute(screen.0) &&
-	    y > self.margins[0].to_absolute(screen.1) &&
-	    x < self.margins[3].to_absolute(screen.0) + self.paddings[3].to_absolute(screen.0) + self.width.to_absolute(screen.0) + self.paddings[1].to_absolute(screen.0) &&
-	    y < self.margins[0].to_absolute(screen.1) + self.paddings[0].to_absolute(screen.1) + self.width.to_absolute(screen.1) + self.paddings[2].to_absolute(screen.1) {
+	if x > self.cur_pos.0 &&
+	    y > self.cur_pos.1 &&
+	    x < self.cur_pos.0 + self.cur_extents.0 &&
+	    y < self.cur_pos.1 + self.cur_extents.1 {
 		if self.associated.get("onclick".to_string()) != JSValue::Undefined {
 		    interpret(Box::new(AST::FunctionCall(Box::new(AST::Value(self.associated.get("onclick".to_string()))), Vec::new())));
 		}
 		for child in &self.children {
-		    child.propogate_click(x-self.margins[3].to_absolute(screen.0)-self.paddings[3].to_absolute(screen.0), y-self.margins[0].to_absolute(screen.1)-self.paddings[0].to_absolute(screen.1), screen, Rc::clone(&interpret));
+		    child.propogate_click(x, y, screen, Rc::clone(&interpret));
 		}
 	    }
     }
@@ -130,11 +155,11 @@ impl Text {
 }
 
 impl Content for Text {
-    fn draw(&self, context: &Context, stream: &mut Stream, screen: (f64, f64)) {
+    fn draw(&mut self, context: &Context, stream: &mut Stream, screen: (f64, f64)) {
 	context.set_source_rgba(self.color[0], self.color[1], self.color[2], self.color[3]);
 	// create the scaled font
 	context.set_font_face(&FontFace::toy_create(&self.font, self.slant, self.weight).unwrap());
-	context.set_font_size(self.size.to_absolute(screen.0));
+	context.set_font_size(self.size.to_absolute(screen.0, AutoType::None));
 	let font = context.scaled_font();
 	let font_extents = font.extents();
 	// draw
@@ -163,8 +188,18 @@ impl Content for Text {
 		}
 	    }
 	}
+	stream.increase_y(font_extents.height());
 	context.fill().unwrap();
     }
+
+    fn propogate_click(&self, _: f64, _: f64, _: (f64, f64), _: Rc<dyn Fn(Box<AST>)>) { }
+}
+
+#[derive(Debug)]
+pub struct EmptyContent;
+
+impl Content for EmptyContent {
+    fn draw(&mut self, _: &Context, _: &mut Stream, _: (f64, f64)) { }
 
     fn propogate_click(&self, _: f64, _: f64, _: (f64, f64), _: Rc<dyn Fn(Box<AST>)>) { }
 }
