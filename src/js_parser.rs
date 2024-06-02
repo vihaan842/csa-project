@@ -1,4 +1,4 @@
-use crate::js::{AST, JSValue, Number};
+use crate::types::{AST, JSValue, Number};
 use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,12 +12,13 @@ pub enum Token {
     RBracket,
     Semicolon,
     Comma,
+    Colon,
 }
 
 impl Token {
-    fn to_operator(&self) -> Option<Operator> {
+    fn to_operator(&self, binary: bool) -> Option<Operator> {
 	if let Token::Ident(s) = self {
-	    Operator::from_str(s, true).ok()
+	    Operator::from_str(s, binary).ok()
 	} else {
 	    None
 	}
@@ -327,12 +328,12 @@ impl ToString for Operator {
 	    Operator::NullishAssignment => String::from("??="),
 	    Operator::Arrow => String::from("=>"),
 	    Operator::New => String::from("new"),
-	    Operator::PrefixIncrement => String::from("++"),
-	    Operator::PrefixDecrement => String::from("--"),
+	    Operator::PrefixIncrement => String::from("pre++"),
+	    Operator::PrefixDecrement => String::from("pre--"),
 	    Operator::LogicalNot => String::from("!"),
 	    Operator::BitwiseNot => String::from("~"),
-	    Operator::UnaryPlus => String::from("+"),
-	    Operator::UnaryMinus => String::from("-"),
+	    Operator::UnaryPlus => String::from("pre+"),
+	    Operator::UnaryMinus => String::from("pre-"),
 	    Operator::TypeOf => String::from("typeof"),
 	    Operator::Void => String::from("void"),
 	    Operator::Delete => String::from("delete"),
@@ -388,6 +389,9 @@ fn _lex(st: &str, pos: usize, tokens: &mut Vec<Token>) {
     } else if st.get(pos..pos+1) == Some(",") {
 	tokens.push(Token::Comma);
 	pos += 1;
+    } else if st.get(pos..pos+1) == Some(":") {
+	tokens.push(Token::Colon);
+	pos += 1;
     } else if st[pos..].chars().next().unwrap().is_whitespace() {
 	pos += 1;
     } else if st[pos..].chars().next().unwrap().is_numeric() {
@@ -437,27 +441,44 @@ pub fn parse(st: &str) -> Vec<AST> {
 fn operator_parse(tokens: &mut std::iter::Peekable<std::slice::Iter<'_,Token>>) -> AST {
     let mut output = Vec::new();
     let mut operators: Vec<(Operator, bool)> = Vec::new();
-    output.push(_parse(tokens));
-    while let Some(Some(o1)) = tokens.peek().map(|t| t.to_operator()) {
-	let _ = tokens.next();
-	let p1 = o1.precedence();
-	operators.retain(|(o2, _)| {
-	    let p2 = o2.precedence();
-	    if p2 > p1 || (p2 == p1 && o1.left_associative()) {
-		let l = output.len();
-		let lhs = Box::new(output.remove(l-2));
-		let rhs = Box::new(output.remove(l-2));
-		output.push(AST::FunctionCall(Box::new(AST::Symbol(o2.to_string())), vec![lhs, rhs]));
-		false
-	    } else {
-		true
-	    }
-	});
-	operators.insert(0, o1.clone());
-	if tokens.peek() == Some(&&Token::LParen) {
-	    let _ = tokens.next();
+    let mut last_was_ident = false;
+    let mut last_was_operator = false;
+    loop {
+	let next = tokens.peek();
+	if next == None || next == Some(&&Token::LParen) || next == Some(&&Token::RBracket) || next == Some(&&Token::Comma) || next == Some(&&Token::Semicolon) || (last_was_ident && next.unwrap().to_operator(!last_was_operator) == None) {
+	    break;
+	}
+	let next = next.unwrap();
+
+	if let Some(o1) = next.to_operator(!last_was_operator) {
+	    let _ = tokens.next().unwrap();
+	    let p1 = o1.precedence();
+	    operators.retain(|(o2, binary)| {
+		let p2 = o2.precedence();
+		if p2 > p1 || (p2 == p1 && o1.left_associative()) {
+		    let l = output.len();
+		    if *binary {
+			let lhs = Box::new(output.remove(l-2));
+			let rhs = Box::new(output.remove(l-2));
+			output.push(AST::FunctionCall(Box::new(AST::Symbol(o2.to_string())), vec![lhs, rhs]));
+		    } else {
+			let el = Box::new(output.remove(l-1));
+			output.push(AST::FunctionCall(Box::new(AST::Symbol(o2.to_string())), vec![el]));
+		    }
+		    
+		    false
+		} else {
+		    true
+		}
+	    });
+	    operators.insert(0, (o1.clone(), !last_was_operator));
+	    last_was_ident = false;
+	    last_was_operator = true;
+	} else if next == &&Token::LParen {
 	    output.push(operator_parse(tokens));
 	    assert_eq!(Some(&Token::RParen), tokens.next());
+	    last_was_ident = true;
+	    last_was_operator = false;
 	} else {
 	    let val = _parse(tokens);
 	    if tokens.peek() == Some(&&Token::LParen) {
@@ -471,13 +492,21 @@ fn operator_parse(tokens: &mut std::iter::Peekable<std::slice::Iter<'_,Token>>) 
 	    } else {
 		output.push(val);
 	    }
+	    last_was_ident = true;
+	    last_was_operator = false;
 	}
     }
-    for operator in operators {
-	let l = output.len();
-	let lhs = Box::new(output.remove(l-2));
-	let rhs = Box::new(output.remove(l-2));
-	output.push(AST::FunctionCall(Box::new(AST::Symbol(operator.to_string())), vec![lhs, rhs]));
+    for (op, binary) in operators {
+	if binary {
+	    let l = output.len();
+	    let lhs = Box::new(output.remove(l-2));
+	    let rhs = Box::new(output.remove(l-2));
+	    output.push(AST::FunctionCall(Box::new(AST::Symbol(op.to_string())), vec![lhs, rhs]));
+	} else {
+	    let l = output.len();
+	    let el = Box::new(output.remove(l-1));
+	    output.push(AST::FunctionCall(Box::new(AST::Symbol(op.to_string())), vec![el]));
+	}
     }
     assert_eq!(1, output.len());
     return output[0].clone();
@@ -503,11 +532,18 @@ fn _parse(tokens: &mut std::iter::Peekable<std::slice::Iter<'_,Token>>) -> AST {
 		
 		AST::IfStatement(cond, block, else_part)
 	    } else if name == &String::from("var") {
-		if let Some(&Token::Ident(ref name)) = tokens.next() {
-		    if Some(&Token::Ident("=".to_string())) == tokens.next() {
-			AST::VariableDefinition(name.to_string(), Some(Box::new(operator_parse(tokens))))
+		let body = operator_parse(tokens);
+		if let AST::Symbol(ref name) = body {
+		    AST::VariableDefinition(name.to_string(), None)
+		} else if let AST::FunctionCall(fun_name, args) = body {
+		    assert_eq!(AST::Symbol("=".to_string()), *fun_name);
+		    assert_eq!(2, args.len());
+		    let name = args[0].clone();
+		    if let AST::Symbol(var_name) = *name {
+			let value = args[1].clone();
+			AST::VariableDefinition(var_name.to_string(), Some(value))
 		    } else {
-			AST::VariableDefinition(name.to_string(), None)
+			panic!("malformed variable definition");
 		    }
 		} else {
 		    panic!("malformed variable definition");
@@ -536,7 +572,40 @@ fn _parse(tokens: &mut std::iter::Peekable<std::slice::Iter<'_,Token>>) -> AST {
 		let _ = tokens.next();
 		let body = Box::new(operator_parse(tokens));
 		AST::FunctionDefinition(name, args, body)
-		
+	    } else if name == &String::from("class") {
+		let name;
+		if let Some(&&Token::Ident(ref n)) = tokens.peek() {
+		    let _ = tokens.next();
+		    name = Some(n.to_string());
+		} else {
+		    name = None;
+		}
+
+		assert_eq!(Some(&Token::LBracket), tokens.next());
+		let mut items = Vec::new();
+		while tokens.peek() != Some(&&Token::RBracket) {
+		    if let Some(Token::Ident(n)) = tokens.next() {
+			let mut args = Vec::new();
+			assert_eq!(Some(&Token::LParen), tokens.next());
+			while tokens.peek() != Some(&&Token::RParen) {
+			    if let Some(Token::Ident(name)) = tokens.next().cloned() {
+				args.push(name);
+				if tokens.peek() == Some(&&Token::Comma) {
+				    let _ = tokens.next();
+				}
+			    } else {
+				panic!("Invalid function definition");
+			    }
+			}
+			let _ = tokens.next();
+			let body = Box::new(operator_parse(tokens));
+			items.push(Box::new(AST::FunctionDefinition(Some(n.to_string()), args, body)));
+		    } else {
+			panic!("illegal class definition");
+		    }
+		}
+		let _ = tokens.next();
+		AST::ClassDefinition(name, items)
 	    } else if name == &String::from("return") {
 		if tokens.peek() == Some(&&Token::Semicolon) {
 		    let _ = tokens.next();
@@ -603,6 +672,39 @@ fn _parse(tokens: &mut std::iter::Peekable<std::slice::Iter<'_,Token>>) -> AST {
 	    AST::Value(JSValue::String(s.to_string()))
 	},
 	Some(Token::LBracket) => {
+	    // check if this is block or object
+	    // if tokens.peek() != Some(&&Token::RBracket) {
+		// let first = operator_parse(tokens);
+		// if let AST::Value(first_key) = first {
+		//     let first_key = if let JSValue::String(s) = first_key { s } else { panic!("malformed object") };
+		//     assert_eq!(Some(&Token::Colon), tokens.next());
+		//     let first_value = operator_parse(tokens);
+		//     if tokens.peek() == Some(&&Token::Comma) {
+		// 	let _ = tokens.next();
+		//     }
+
+		//     let obj = Object::new();
+		//     obj.insert(first_key, first_value);
+
+		//     while tokens.peek() != Some(&&Token::RBracket) {
+		// 	if let AST::Value(key) = operator_parse(tokens) {
+		// 	    let key = if let JSValue::String(s) = key { s } else { panic!("malformed object") };
+		// 	    assert_eq!(Some(&Token::Colon), tokens.next());
+		// 	    let value = operator_parse(tokens);
+		// 	    obj.insert(key, value);
+		// 	    if tokens.peek() == Some(&&Token::Comma) {
+		// 		let _ = tokens.next();
+		// 	    }
+		// 	} else {
+		// 	    panic!("Incorrectly formatted object");
+		// 	}
+		//     }
+		//     AST::Value(JSValue::Object(obj))
+		// } else {
+		    // if tokens.peek() == Some(&&Token::Semicolon) {
+			// let _ = tokens.next();
+		    // }
+	    // let mut lines = vec![Box::new(first)];
 	    let mut lines = Vec::new();
 	    while tokens.peek() != Some(&&Token::RBracket) {
 		lines.push(Box::new(operator_parse(tokens)));
@@ -612,6 +714,10 @@ fn _parse(tokens: &mut std::iter::Peekable<std::slice::Iter<'_,Token>>) -> AST {
 	    }
 	    let _ = tokens.next();
 	    AST::Block(lines)
+	    // }
+	    // } else {
+		// AST::Block(Vec::new())
+	    // }
 	}
 	t => panic!("Unexpected token {:?}", t)
     }

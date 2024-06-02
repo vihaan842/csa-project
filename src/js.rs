@@ -1,123 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::cell::RefCell;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum AST {
-    Value(JSValue),
-    Symbol(String),
-    Block(Vec<Box<AST>>),
-    FunctionCall(Box<AST>, Vec<Box<AST>>),
-    VariableDefinition(String, Option<Box<AST>>),
-    FunctionDefinition(Option<String>, Vec<String>, Box<AST>),
-    ReturnStatement(Option<Box<AST>>),
-    ThrowStatement(Box<AST>),
-    BreakStatement,
-    ContinueStatement,
-    IfStatement(Box<AST>, Box<AST>, Option<Box<AST>>),
-    TryStatement(Box<AST>, Option<String>, Box<AST>, Option<Box<AST>>),
-    WhileStatement(Box<AST>, Box<AST>),
-    ForStatement(Box<AST>, Box<AST>, Box<AST>, Box<AST>),
-}
+use crate::types::{JSValue, AST, Object, JSObject, Number, JSFunction};
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum JSValue {
-    Undefined,
-    Null,
-    Boolean(bool),
-    Number(Number),
-    String(String),
-    Object(Rc<Object>),
-    Function(JSFunction),
-    CompletionRecord(String, Box<JSValue>, String)
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Number {
-    NaN,
-    PInf,
-    NInf,
-    Num(f64)
-}
-
-#[derive(Clone)]
-pub enum JSFunction {
-    BuiltinFunction(Rc<dyn Fn(&mut VecDeque<HashMap<String, JSValue>>, Vec<JSValue>) -> JSValue>),
-    BuiltinMacro(Rc<dyn Fn(&mut VecDeque<HashMap<String, JSValue>>, Vec<Box<AST>>) -> JSValue>),
-    UserDefined(Vec<String>, Box<AST>)
-}
-
-impl std::cmp::PartialEq for JSFunction {
-    fn eq(&self, other: &Self) -> bool {
-	match self {
-            JSFunction::BuiltinFunction(f1) => {
-		if let JSFunction::BuiltinFunction(f2) = other {
-		    Rc::ptr_eq(f1, f2)
-		} else {
-		    false
-		}
-	    },
-
-	    JSFunction::BuiltinMacro(f1) => {
-		if let JSFunction::BuiltinMacro(f2) = other {
-		    Rc::ptr_eq(f1, f2)
-		} else {
-		    false
-		}
-	    },
-
-	    JSFunction::UserDefined(a1, b1) => {
-		if let JSFunction::UserDefined(a2, b2) = other {
-		    a1 == a2 && b1 == b2
-		} else {
-		    false
-		}
-	    },
-	}
-    }
-}
-
-impl std::fmt::Debug for JSFunction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-	match self {
-	    JSFunction::BuiltinFunction(_) => {
-		write!(f, "BuiltinFunction")
-	    },
-	    JSFunction::BuiltinMacro(_) => {
-		write!(f, "BuiltinMacro")
-	    },
-	    JSFunction::UserDefined(a1, b1) => {
-		write!(f, "UserDefined({:?}, {:?})", a1, b1)
-	    }
-	}
-    }
-}
-
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Object {
-    properties: Rc<RefCell<HashMap<String, JSValue>>>
-}
-
-impl Object {
-    pub fn new() -> Object {
-	Object { properties: Rc::new(RefCell::new(HashMap::new())) }
-    }
-
-    pub fn get(&self, name: String) -> JSValue {
-	if let Some(value) = self.properties.borrow().get(&name) {
-	    return value.clone();
-	} else {
-	    return JSValue::Undefined;
-	}
-    }
-    
-    pub fn insert(&self, name: String, value: JSValue) {
-	let _ = self.properties.borrow_mut().insert(name, value);
-    }
-}
-
-pub fn interpret(code: Vec<AST>) {
+pub fn interpret(code: Vec<AST>, document: Object) -> VecDeque<HashMap<String, JSValue>> {
     let mut global_scope = HashMap::new();
 
     global_scope.insert(".".to_string(), JSValue::Function(JSFunction::BuiltinMacro(Rc::new(
@@ -156,7 +42,17 @@ pub fn interpret(code: Vec<AST>) {
 					inner_scope.insert(name.to_string(), value);
 				    }
 				    vars.push_front(inner_scope);
-				    ret = _interpret(body, vars);
+				    let ret1 = _interpret(body, vars);
+				    if let JSValue::CompletionRecord(name, value, _) = ret1 {
+					if name == "return".to_string() {
+					    ret = *value.clone();
+					} else {
+					    panic!("illegal return value");
+					}
+				    } else {
+					ret = ret1;
+				    }
+				    
 				    let _ = vars.pop_front();
 				}
 			    }
@@ -177,6 +73,32 @@ pub fn interpret(code: Vec<AST>) {
 	}
     ))));
 
+    global_scope.insert("new".to_string(), JSValue::Function(JSFunction::BuiltinMacro(Rc::new(
+	|vars, args| {
+	    assert_eq!(1, args.len());
+	    if let AST::FunctionCall(head, args) = *args[0].clone() {
+		_interpret(Box::new(AST::FunctionCall(Box::new(AST::Symbol(".".to_string())), vec![head.clone(), Box::new(AST::FunctionCall(Box::new(AST::Symbol("constructor".to_string())), args.clone()))])), vars)
+	    } else {
+		panic!("Incorrect arguments to new");
+	    }
+	}
+    ))));
+
+    global_scope.insert("typeof".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+	|_vars, args| {
+	    assert_eq!(1, args.len());
+	    match args[0] {
+		JSValue::Undefined => JSValue::String("undefined".to_string()),
+		JSValue::Null => JSValue::String("object".to_string()),
+		JSValue::Boolean(_) => JSValue::String("boolean".to_string()),
+		JSValue::Number(_) => JSValue::String("number".to_string()),
+		JSValue::String(_) => JSValue::String("string".to_string()),
+		JSValue::Function(_) => JSValue::String("function".to_string()),
+		_ => JSValue::String("object".to_string()),
+	    }
+	}
+    ))));
+    
     global_scope.insert("=".to_string(), JSValue::Function(JSFunction::BuiltinMacro(Rc::new(
 	|vars, args| {
 	    assert_eq!(2, args.len());
@@ -273,6 +195,20 @@ pub fn interpret(code: Vec<AST>) {
 	}
     ))));
 
+    global_scope.insert("pre+".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+	|_vars, args| {
+	    assert_eq!(1, args.len());
+	    let el = args[0].clone();
+
+	    match el {
+		JSValue::Number(Number::Num(n1)) => {
+		    JSValue::Number(Number::Num(n1))
+		},
+		_ => todo!("Other additions")
+	    }
+	}
+    ))));
+
     global_scope.insert("-".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
 	|_vars, args| {
 	    assert_eq!(2, args.len());
@@ -289,6 +225,20 @@ pub fn interpret(code: Vec<AST>) {
 		    }
 		},
 		_ => todo!("Other subtractions")
+	    }
+	}
+    ))));
+
+    global_scope.insert("pre-".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+	|_vars, args| {
+	    assert_eq!(1, args.len());
+	    let el = args[0].clone();
+
+	    match el {
+		JSValue::Number(Number::Num(n1)) => {
+		    JSValue::Number(Number::Num(-n1))
+		},
+		_ => todo!("Other additions")
 	    }
 	}
     ))));
@@ -333,7 +283,7 @@ pub fn interpret(code: Vec<AST>) {
 	}
     ))));
 
-    let console = Object::new();
+    let console = Object::JS(Rc::new(JSObject::new()));
     console.insert("log".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
 	|_vars, args| {
 	    assert_eq!(1, args.len());
@@ -342,16 +292,31 @@ pub fn interpret(code: Vec<AST>) {
 	}
     ))));
 
-    global_scope.insert("console".to_string(), JSValue::Object(Rc::new(console)));
+    global_scope.insert("console".to_string(), JSValue::Object(console));
+
+    document.insert("getElementById".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+	|vars, args| {
+	    assert_eq!(1, args.len());
+	    if let Some(JSValue::Object(Object::HTML(h))) = vars[0].get("this") {
+		crate::types::get_element_by_id(Rc::clone(h), args[0].clone())
+	    } else {
+		panic!("Someone changed the document :(");
+	    }
+	}
+    ))));
+
+    global_scope.insert("document".to_string(), JSValue::Object(document));
     
     let mut vars = VecDeque::new();
     vars.push_front(global_scope);
     for part in code {
 	let _ = _interpret(Box::new(part), &mut vars);
     }
+
+    return vars;
 }
 
-fn _interpret(code: Box<AST>, vars: &mut VecDeque<HashMap<String, JSValue>>) -> JSValue {
+pub fn _interpret(code: Box<AST>, vars: &mut VecDeque<HashMap<String, JSValue>>) -> JSValue {
     match &*code {
 	AST::Value(v) => v.clone(),
 	AST::Symbol(s) => {
@@ -434,6 +399,63 @@ fn _interpret(code: Box<AST>, vars: &mut VecDeque<HashMap<String, JSValue>>) -> 
 	    }
 	    val
 	},
+	AST::ClassDefinition(name, methods) => {
+	    let obj = Object::JS(Rc::new(JSObject::new()));
+
+	    let mut object_methods = Vec::new();
+	    for func in methods {
+		if let AST::FunctionDefinition(n, arg_names, body) = *func.clone() {
+		    if n != Some("constructor".to_string()) {
+			object_methods.push((n.unwrap(), JSValue::Function(JSFunction::UserDefined(arg_names, body.clone()))));
+		    }
+		} else {
+		    panic!("invalid class definition");
+		}
+	    }
+	    
+	    for func in methods {
+		let object_methods = object_methods.clone();
+		if let AST::FunctionDefinition(n, arg_names, body) = *func.clone() {
+		    let arg_names = arg_names.clone();
+		    let body = body.clone();
+		    if n == Some("constructor".to_string()) {
+			obj.insert("constructor".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+			    move |vars, args| {
+				let mut inner_scope = HashMap::new();
+				let this = Object::JS(Rc::new(JSObject::new()));
+				inner_scope.insert("this".to_string(), JSValue::Object(this.clone()));
+
+				for (name, val) in arg_names.iter().zip(args) {
+				    inner_scope.insert(name.to_string(), val);
+				}
+				
+				vars.push_front(inner_scope);
+				
+				let _ = _interpret(body.clone(), vars);
+				let _ = vars.pop_front();
+
+				for (name, body) in &object_methods {
+				    this.insert(name.to_string(), body.clone());
+				}
+				JSValue::Object(this)
+			    }
+			))));
+		    }
+		    // else {
+		    // 	obj.insert(n.unwrap(), JSValue::Function(JSFunction::UserDefined(arg_names, body.clone())));
+		    // }
+		} else {
+		    panic!("invalid class definition");
+		}
+	    }
+
+	    let val = JSValue::Object(obj.clone());
+	    let end = vars.len() - 1;
+	    if let Some(name) = name {
+		vars[end].insert(name.clone(), val.clone());
+	    }
+	    val
+	}
 	AST::ReturnStatement(value) => {
 	    if let Some(value) = value {
 		JSValue::CompletionRecord("return".to_string(), Box::new(_interpret(value.clone(), vars)), "".to_string())
