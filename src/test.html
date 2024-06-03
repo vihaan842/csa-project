@@ -1,15 +1,68 @@
 <!DOCTYPE html>
 <html>
   <body>
-    <h1 id="hello" style="color:green;background-color:blue;">Hopefully this works</h1>
-    <p>Hello</p>
+    <h1>Demo</h1>
+    <p>This is a demonstration file made to showcase the abilities of this browser. It should be located at src/test.html</p>
+    <p>If you look at the source of this file, you will notice that it is a completely normal HTML web file (static content) with some embedded JavaScript (to make it dynamic). You can edit the file as you please and upon rerunning the browser, the content/behavior of this page should change.</p>
+    <p>This browser is very, very far from supporting all web features. Regarding the JavaScript interpreter, which was the main focus of this project, it is theoretically capable of doing a lot, but I have not implemented everything. If you stick to the features I used, it should work (note that you cannot use postfix operators like ++, nor can you use less than due to a limitation in my HTML parser). Basic if statements, for loops, while loops, functions, classes, and methods should work.</p>
+    <p>The interactive element presented here is a button. Upon pressing it, the counter below it should increment. Additionally, it should display and undisplay another element, which will also sometimes display a different message (including a calculation of the counter factorial) in different styling (to show that the style of the element can be changed as well). Additionally, some output is printed in the terminal. There is also a second button which hides the first one. You will not be able to activate the first button after it is hidden.</p>
+    <button id="hello" style="color:red;background-color:blue;">Button. Please press!!!</button>
+    <h1 id="value"></h1>
+    <h1 id="secret" style="display:none;">Secret :)</h1>
+    <button id="hello2" style="color:white;background-color:black">Button.Press if you would like</button>
   </body>
   <script>
     var x = 0;
     var hello = document.getElementById("hello");
+    var hello2 = document.getElementById("hello2");
+    var value = document.getElementById("value");
+    var secret = document.getElementById("secret");
+
+    class Mystery {
+	constructor(x) {
+	    this.secret = x;
+	}
+
+	tellSecret() {
+	    console.log("The secret is "+this.secret);
+	}
+    }
+    var m = new Mystery(23);
+    m.tellSecret();
+    
+    value.innerText = x;
     hello.onclick = function() {
 	x = x + 1;
 	console.log(x);
+	value.innerText = x;
+	if (x % 2 == 1) {
+	    secret.style.display = "block";
+	} else {
+	    secret.style.display = "none";
+	}
+	if (x % 3 == 0) {
+	    secret.innerText = factorial(x)+" Super Secret!!!!!";
+	    secret.style.color = "red";
+	} else {
+	    secret.innerText = "Secret :)";
+	    secret.style.color = "black";
+	}
     };
+
+    hello2.onclick = function() {
+	if (hello.style.display == "none") {
+	    hello.style.display = "block"
+	} else {
+	    hello.style.display = "none"
+	}
+    }
+
+    function factorial(n) {
+	var x = 1;
+	for (var i = n; i > 1; i = i - 1) {
+	    x = x * i;
+	}
+	return x;
+    }
   </script>
 </html>

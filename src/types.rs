@@ -3,6 +3,7 @@ use crate::rules;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::fmt::{Display, Formatter, Error};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AST {
@@ -37,12 +38,36 @@ pub enum JSValue {
     CompletionRecord(String, Box<JSValue>, String)
 }
 
+impl Display for JSValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+	match &self {
+	    JSValue::Undefined => write!(f, "undefined"),
+	    JSValue::Null => write!(f, "null"),
+	    JSValue::Boolean(b) => write!(f, "{}",  b),
+	    JSValue::Number(n) => write!(f, "{}",  n),
+	    JSValue::String(s) => write!(f, "{}",  s),
+	    _ => write!(f, "{:?}", self)
+	}
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Number {
     NaN,
     PInf,
     NInf,
     Num(f64)
+}
+
+impl Display for Number {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+	match &self {
+	    Number::NaN => write!(f, "NaN"),
+	    Number::PInf => write!(f, "Infinity"),
+	    Number::NInf => write!(f, "-Infinity"),
+	    Number::Num(n) => write!(f, "{}", n),
+	}
+    }
 }
 
 #[derive(Clone)]
@@ -102,20 +127,25 @@ impl std::fmt::Debug for JSFunction {
 pub enum Object {
     JS(Rc<JSObject>),
     HTML(Rc<Node>),
+    CSS(Rc<RefCell<HashMap<String, String>>>)
 }
 
 impl Object {
     pub fn get(&self, name: String) -> JSValue {
 	match self {
 	    Object::JS(js) => js.get(name),
-	    Object::HTML(html) => html.get(name)
+	    Object::HTML(html) => html.get(name),
+	    Object::CSS(css) => css.borrow().get(&name).map_or(JSValue::Undefined, |v| JSValue::String(v.to_string()))
 	}
     }
 
     pub fn insert(&self, name: String, value: JSValue) {
 	match self {
 	    Object::JS(js) => js.insert(name, value),
-	    Object::HTML(html) => html.insert(name, value)
+	    Object::HTML(html) => html.insert(name, value),
+	    Object::CSS(css) => {
+		let _ = css.borrow_mut().insert(name, format!("{}", value));
+	    }
 	}
     }
 }
@@ -160,7 +190,7 @@ pub struct Node {
     // parent node
     pub parent: RefCell<Option<Rc<Node>>>,
     // css properties
-    pub css: RefCell<HashMap<String, String>>,
+    pub css: Rc<RefCell<HashMap<String, String>>>,
     // other properties
     properties: Rc<RefCell<HashMap<String, JSValue>>>
 }
@@ -168,7 +198,7 @@ pub struct Node {
 impl Node {
     // empty document
     pub fn get_document() -> Node {
-	return Node{node_type: NodeType::Document(RefCell::new(Vec::new())), parent: RefCell::new(None), css: RefCell::new(HashMap::new()), properties: Rc::new(RefCell::new(HashMap::new()))}
+	return Node{node_type: NodeType::Document(RefCell::new(Vec::new())), parent: RefCell::new(None), css: Rc::new(RefCell::new(HashMap::new())), properties: Rc::new(RefCell::new(HashMap::new()))}
     }
     // get new container node from tag
     pub fn from_tag(tag_content: String) -> Node {
@@ -209,7 +239,7 @@ impl Node {
 		params.insert(param_parts[0].to_string(), param_parts[1].to_string());
 	    }
 	}
-	Node{node_type: NodeType::Container(tag_name.to_string(), RefCell::new(Vec::new()), params), parent: RefCell::new(None), css: RefCell::new(HashMap::new()), properties: Rc::new(RefCell::new(HashMap::new()))}
+	Node{node_type: NodeType::Container(tag_name.to_string(), RefCell::new(Vec::new()), params), parent: RefCell::new(None), css: Rc::new(RefCell::new(HashMap::new())), properties: Rc::new(RefCell::new(HashMap::new()))}
     }
     // gets children, if there are any
     pub fn children(&self) -> &RefCell<Vec<Rc<Node>>> {
@@ -221,7 +251,7 @@ impl Node {
     }
     // get new text node from text
     pub fn from_text(text: String) -> Node {
-	return Node{node_type: NodeType::Text(text), parent: RefCell::new(None), css: RefCell::new(HashMap::new()), properties: Rc::new(RefCell::new(HashMap::new()))}
+	return Node{node_type: NodeType::Text(text), parent: RefCell::new(None), css: Rc::new(RefCell::new(HashMap::new())), properties: Rc::new(RefCell::new(HashMap::new()))}
     }
     // checks if container node has end tag
     pub fn is_empty_element(&self) -> bool {
@@ -304,27 +334,32 @@ impl Node {
 	}
     }
 
-    // pub fn propogate_click(&self, x: f64, y: f64, width: i32, height: i32, left: f64, top: f64, interpret: Rc<dyn Fn(Box<AST>) -> JSValue>) {
-    // 	if self.render.borrow().contains_point(x, y, width, height, left, top) {
-    // 	    if self.get("onclick".to_string()) != JSValue::Undefined {
-    // 		let _ = interpret(Box::new(AST::FunctionCall(Box::new(AST::Value(self.get("onclick".to_string()))), Vec::new())));
-    // 	    }
-    // 	    match &self.node_type {
-    // 		NodeType::Text(_) => {},
-    // 		NodeType::Container(_, children, _) => {
-    // 		    for child in &*children.borrow() {
-    // 			child.propogate_click(x, y, width, height, left, top, Rc::clone(&interpret));
-    // 		    }
-    // 		},
-    // 		NodeType::Document(children) => {
-    // 		    for child in &*children.borrow() {
-    // 			child.propogate_click(x, y, width, height, left, top, Rc::clone(&interpret));
-    // 		    }
-    // 		},
-    // 	    }
-    // 	}
-    // }
-
+    pub fn propogate_css(&self) {
+	self._propogate_css(Vec::new());
+    }
+    
+    fn _propogate_css(&self, pairs: Vec<(String, String)>) {
+	for (key, value) in pairs {
+	    if !self.css.borrow().contains_key(&key) {
+		self.css.borrow_mut().insert(key, value);
+	    }
+	}
+	let mut inherited = Vec::new();
+	for (key, value) in &*self.css.borrow() {
+	    if crate::rules::INHERITED_PROPERTIES.iter().any(|e| e==&key) {
+		inherited.push((key.to_string(), value.to_string()));
+	    }
+	}
+	match &self.node_type {
+	    NodeType::Container(_, children, _) | NodeType::Document(children) => {
+		for child in &*children.borrow() {
+		    child._propogate_css(inherited.clone());
+		}
+	    },
+	    _ => {}
+	}
+    }
+    
     pub fn get(&self, name: String) -> JSValue {
 	if name == "nodeType" {
 	    match self.node_type {
@@ -344,6 +379,8 @@ impl Node {
 		NodeType::Container(_, _, _) => JSValue::Null,
 		NodeType::Document(_) => JSValue::Null,
 	    }
+	} else if name == "style" {
+	    JSValue::Object(Object::CSS(Rc::clone(&self.css)))
 	} else {
 	    if let Some(value) = self.properties.borrow().get(&name) {
 		value.clone()
@@ -354,7 +391,17 @@ impl Node {
     }
     
     pub fn insert(&self, name: String, value: JSValue) {
-	let _ = self.properties.borrow_mut().insert(name, value);
+	if name == "innerText" {
+	    // this is only a method on html elements
+	    match &self.node_type {
+		NodeType::Text(_) => {},
+		NodeType::Container(_, children, _) | NodeType::Document(children) => {
+		    *children.borrow_mut() = vec![Rc::new(Node::from_text(format!("{}", value)))];
+		}
+	    }
+	} else {
+	    let _ = self.properties.borrow_mut().insert(name, value);
+	}
     }
 }
 

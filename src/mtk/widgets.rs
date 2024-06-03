@@ -117,7 +117,7 @@ impl Content for Block {
 	
 	self.cur_pos = (parent_stream.get_x() + disth(self.margins[3]), parent_stream.get_y() + distv(self.margins[0]));
 	
-	parent_stream.increase_y((distv(self.height)+distv(self.margins[2])+distv(self.margins[0])).max(child_stream.get_y() - parent_stream.get_y()));
+	parent_stream.increase_y((distv(self.height)+distv(self.margins[2])+distv(self.margins[0])).max(child_stream.get_y() - parent_stream.get_y()) + distv(self.paddings[0]) + distv(self.paddings[2]));
 
 	self.cur_extents = (disth(self.height), parent_stream.get_y() - self.cur_pos.1);
     }

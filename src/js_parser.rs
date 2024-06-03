@@ -416,7 +416,7 @@ fn _lex(st: &str, pos: usize, tokens: &mut Vec<Token>) {
 	let start = pos;
 	loop {
 	    pos += 1;
-	    if (|c: char| c.is_alphanumeric() || c.is_whitespace())(st[pos..].chars().next().unwrap()) || &st[pos..pos+1] == "$" {
+	    if (|c: char| c.is_alphanumeric() || c.is_whitespace())(st[pos..].chars().next().unwrap()) || &st[pos..pos+1] == "$" || &st[pos..pos+1] == "\"" {
 		tokens.push(Token::Ident(String::from(&st[start..pos])));
 		break;
 	    }

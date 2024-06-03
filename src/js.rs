@@ -147,12 +147,25 @@ pub fn interpret(code: Vec<AST>, document: Object) -> VecDeque<HashMap<String, J
 	}
     ))));
 
-    // global_scope.insert(">".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
-    // 	|_vars, args| {
-    // 	    assert_eq!(2, args.len());
-    // 	    JSValue::Boolean(args[0].clone() > args[1].clone())
-    // 	}
-    // ))));
+    global_scope.insert(">".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+	|_vars, args| {
+	    assert_eq!(2, args.len());
+	    let lhs = args[0].clone();
+	    let rhs = args[1].clone();
+
+	    match lhs {
+		JSValue::Number(Number::Num(n1)) => {
+		    match rhs {
+			JSValue::Number(Number::Num(n2)) => {
+			    JSValue::Boolean(n1>n2)
+			},
+			_ => todo!("Other greater thans")
+		    }
+		},
+		_ => todo!("Other greater thans")
+	    }
+	}
+    ))));
 
     // global_scope.insert(">=".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
     // 	|_vars, args| {
@@ -187,8 +200,14 @@ pub fn interpret(code: Vec<AST>, document: Object) -> VecDeque<HashMap<String, J
 			JSValue::Number(Number::Num(n2)) => {
 			    JSValue::Number(Number::Num(n1+n2))
 			},
+			JSValue::String(s) => {
+			    JSValue::String(format!("{}", n1)+&s)
+			},
 			_ => todo!("Other additions")
 		    }
+		},
+		JSValue::String(s) => {
+		    JSValue::String(s+&format!("{}", rhs))
 		},
 		_ => todo!("Other additions")
 	    }
@@ -279,6 +298,26 @@ pub fn interpret(code: Vec<AST>, document: Object) -> VecDeque<HashMap<String, J
 		    }
 		},
 		_ => todo!("Other divisions")
+	    }
+	}
+    ))));
+
+    global_scope.insert("%".to_string(), JSValue::Function(JSFunction::BuiltinFunction(Rc::new(
+	|_vars, args| {
+	    assert_eq!(2, args.len());
+	    let lhs = args[0].clone();
+	    let rhs = args[1].clone();
+
+	    match lhs {
+		JSValue::Number(Number::Num(n1)) => {
+		    match rhs {
+			JSValue::Number(Number::Num(n2)) => {
+			    JSValue::Number(Number::Num(n1%n2))
+			},
+			_ => todo!("Other remainders")
+		    }
+		},
+		_ => todo!("Other remainders")
 	    }
 	}
     ))));

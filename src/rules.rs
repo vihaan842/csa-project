@@ -1,7 +1,7 @@
 // some constants
 // pub const DEFAULT_FONT: &str = "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf";
-pub const DEFAULT_FONT: &str = "/Library/Fonts/Arial Unicode.ttf";
-pub const DEFAULT_FONT_SIZE: usize = 12;
+// pub const DEFAULT_FONT: &str = "/Library/Fonts/Arial Unicode.ttf";
+pub const DEFAULT_FONT_SIZE: usize = 16;
 
 // elements that don't have an end tag
 pub const EMPTY_ELEMENTS: [&str;15] = [

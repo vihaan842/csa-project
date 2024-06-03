@@ -211,6 +211,7 @@ pub fn apply_css(css_rules: Vec<(String, HashMap<String, String>)>, node: Rc<Nod
 	_ => {}
     }
 }
+
 fn apply_css_rule(node: Rc<Node>, key: String, value: String) {
     match &node.node_type {
 	NodeType::Container(_, children, _) => {

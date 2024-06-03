@@ -14,8 +14,8 @@ use std::io::Read;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-// use glib::clone;
-// use gtk::glib;
+use gtk::glib;
+use glib::clone;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, DrawingArea, GestureClick};
 
@@ -37,7 +37,7 @@ fn main() {
     let js = parsed_html.find_js();
     let parsed_js = js_parser::parse(&js);
     let vars = Rc::new(RefCell::new(js::interpret(parsed_js, Object::HTML(Rc::clone(&parsed_html)))));
-    *document_setter.borrow_mut() = Some(crate::render::render_node(parsed_html));
+    *document_setter.borrow_mut() = Some(crate::render::render_node(Rc::clone(&parsed_html)));
 
     let interpret: Rc<dyn Fn(Box<types::AST>)> = Rc::new(move |code| {
 	let vars = Rc::clone(&vars);
@@ -45,6 +45,7 @@ fn main() {
     });
     
     app.connect_activate(move |app| {
+	let parsed_html = Rc::clone(&parsed_html);
 	let document = Rc::clone(&document);
 	let document_click = Rc::clone(&document);
         let win = ApplicationWindow::builder()
@@ -68,12 +69,16 @@ fn main() {
 
 	let interpret = Rc::clone(&interpret);
 	let key_press = GestureClick::new();
-	key_press.connect_pressed(move |gesture, _n, x, y| {
+	key_press.connect_pressed(clone!(@weak drawing_area => move |gesture, _n, x, y| {
 	    let document = Rc::clone(&document_click);
+	    let parsed_html = Rc::clone(&parsed_html);
 	    let widget = gesture.widget();
 	    
 	    document.borrow().as_ref().expect("big oops").propogate_click(x, y, (widget.width().into(), widget.height().into()), Rc::clone(&interpret));
-	});
+	    parsed_html.propogate_css();
+	    *document.borrow_mut() = Some(crate::render::render_node(parsed_html));
+	    drawing_area.queue_draw();
+	}));
 
 	drawing_area.add_controller(key_press);
 	
@@ -81,16 +86,6 @@ fn main() {
 
         win.present();
     });
-
-    // let mut file = std::fs::File::open("src/test.js").unwrap();
-    // let mut contents = String::new();
-    // file.read_to_string(&mut contents).unwrap();
-
-    // let parsed = crate::js_parser::parse(&contents);
-    
-    // println!("{:?}", parsed);
-
-    // crate::js::interpret(parsed);
 
     app.run();
 }
